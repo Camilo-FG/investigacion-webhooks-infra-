@@ -1,0 +1,11 @@
+.env
+*.log
+.DS_Store
+
+# Sibling repos — not part of Persona 3 infra
+servicio-a/
+servicio-b/
+frontend/
+
+# Local IDE
+*.code-workspace

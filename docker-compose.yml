@@ -1,0 +1,30 @@
+services:
+  service-a:
+    build: ./servicio-a
+    container_name: service-a
+    ports:
+      - "${PORT_A:-3000}:3000"
+    environment:
+      PORT: 3000
+      HMAC_SECRET: ${HMAC_SECRET}
+    restart: unless-stopped
+
+  service-b:
+    build: ./servicio-b
+    container_name: service-b
+    ports:
+      - "${PORT_B:-3001}:3001"
+    environment:
+      PORT: 3001
+      HMAC_SECRET: ${HMAC_SECRET}
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    ports:
+      - "${PORT_FRONTEND:-8080}:80"
+    depends_on:
+      - service-a
+      - service-b
+    restart: unless-stopped
