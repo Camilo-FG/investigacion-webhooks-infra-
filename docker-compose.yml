@@ -20,7 +20,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build: ./investigacionwebhooksfrontend
     container_name: frontend
     ports:
       - "${PORT_FRONTEND:-8080}:80"

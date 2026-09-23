@@ -84,7 +84,7 @@ cd investigacion-webhooks
 # 2. Los tres servicios, como carpetas hermanas dentro de la anterior
 git clone https://github.com/Keril-valle/servicio-a.git
 git clone -b development https://github.com/Luz-Davila/servicio-b.git
-git clone https://github.com/Camilo-FG/investigacionwebhooksfrontend.git frontend
+git clone https://github.com/Camilo-FG/investigacionwebhooksfrontend.git
 
 # 3. Variables de entorno (este paso es obligatorio)
 cp .env.example .env
@@ -127,7 +127,7 @@ Con Node 20 o superior, en tres terminales:
 ```bash
 cd servicio-a && npm install && npm run start      # :3000
 cd servicio-b && npm install && npm run start      # :3001 (rama development)
-cd frontend   && npm install && npm run dev        # :8080, con proxy hacia A y B
+cd investigacionwebhooksfrontend && npm install && npm run dev   # :8080, con proxy hacia A y B
 ```
 
 En este modo la URL de suscripción es `http://localhost:3001/webhooks/pedido` (el frontend la propone automáticamente). Si el puerto 3000 o 3001 está ocupado, se puede cambiar con `PORT=3002 npm run start` en el servicio y `PORT_A=3002 npm run dev` (o `PORT_B`) en el frontend.
@@ -226,7 +226,7 @@ investigacion-webhooks/          <- repo de infraestructura
 ├── run.sh / run.ps1
 ├── servicio-a/                  <- clonado dentro (ignorado por el repo de infra)
 ├── servicio-b/
-└── frontend/
+└── investigacionwebhooksfrontend/
 ```
 
 **Tecnologías:** NestJS 11 (A y B), React 18 + Vite (frontend), Nginx (servidor estático y proxy), Docker Compose, módulo `crypto` de Node para HMAC-SHA256.

@@ -5,7 +5,7 @@
 # Sibling repos — not part of Persona 3 infra
 servicio-a/
 servicio-b/
-frontend/
+investigacionwebhooksfrontend/
 
 # Local IDE
 *.code-workspace
