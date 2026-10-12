@@ -7,6 +7,10 @@ services:
     environment:
       PORT: 3000
       HMAC_SECRET: ${HMAC_SECRET}
+      DATABASE_URL: ${DATABASE_URL}
+      SERVICE_B_URL: http://service-b:3001
+      ONVO_SECRET_KEY: ${ONVO_SECRET_KEY}
+      ONVO_WEBHOOK_SECRET: ${ONVO_WEBHOOK_SECRET}
     restart: unless-stopped
 
   service-b:
@@ -17,6 +21,9 @@ services:
     environment:
       PORT: 3001
       HMAC_SECRET: ${HMAC_SECRET}
+      DEFAULT_WEBHOOK_URL: http://service-a:3000/webhooks/payments
+      PROCESSING_DELAY_MS: ${PROCESSING_DELAY_MS:-3000}
+      DEFERRED_THRESHOLD: ${DEFERRED_THRESHOLD:-50000}
     restart: unless-stopped
 
   frontend:

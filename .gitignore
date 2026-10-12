@@ -9,3 +9,6 @@ investigacionwebhooksfrontend/
 
 # Local IDE
 *.code-workspace
+
+# Skills locales de agentes de IA
+.opencode/

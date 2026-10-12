@@ -1,8 +1,8 @@
-# Webhooks: Servicio A avisa a Servicio B
+# Webhooks: confirmación automática de pagos
 
 Proyecto de **Paradigmas de Programación** · Investigación sobre webhooks.
 
-Dos servicios NestJS se comunican con un webhook firmado con HMAC-SHA256, y un frontend en React permite ver todo el recorrido en vivo. Todo corre con Docker Compose.
+Una tienda (Servicio A, Store / Merchant API) envía pagos a un proveedor de pagos simulado (Servicio B, Fake Payment Provider). El proveedor procesa el pago con una demora y **avisa el resultado a la tienda con un webhook firmado con HMAC-SHA256**. Los dos servicios son NestJS, los pedidos y pagos se guardan en PostgreSQL (Supabase) y todo corre con Docker Compose.
 
 ## Contenido
 
@@ -19,9 +19,9 @@ Dos servicios NestJS se comunican con un webhook firmado con HMAC-SHA256, y un f
 
 **Webhooks.** Un webhook es una petición HTTP (normalmente un `POST`) que un sistema envía por su cuenta a una URL que otro sistema registró de antemano, en el momento en que ocurre un evento. Es un modelo *push*: quien tiene la información avisa, en vez de esperar a que le pregunten.
 
-Se contrasta con el *polling* (modelo *pull*), en el que el interesado consulta cada cierto tiempo si hay novedades. Un ejemplo cotidiano: darle tu número a una empresa de envíos para que te avisen cuando llegue el paquete, en lugar de llamar cada cinco minutos a preguntar.
+Se contrasta con el *polling* (modelo *pull*), en el que el interesado consulta cada cierto tiempo si hay novedades. Sin webhook, la tienda tendría que preguntarle al proveedor cada pocos segundos "¿ya se aprobó el pago?".
 
-**Escenario implementado.** Cuando se crea un pedido en el Servicio A, este notifica automáticamente al Servicio B con los datos del pedido (`id`, `producto`, `monto`, `fecha`). Nadie llama manualmente a B: A lo hace como consecuencia de otra acción. Como el endpoint de B es público, cada mensaje va firmado con HMAC para que B pueda comprobar que es legítimo y que no fue alterado.
+**Escenario implementado.** Un cliente compra un producto. La tienda crea el pedido y su pago en estado `PENDING` y se lo envía al proveedor. El proveedor responde de inmediato "recibido" (`PROCESSING`), procesa el pago durante unos segundos y, cuando decide el resultado, envía un webhook a la tienda. La tienda verifica la firma y actualiza el pago y el pedido. Es el mismo modelo que usan Stripe u Onvo.
 
 ## 2. Diagrama
 
@@ -29,44 +29,44 @@ Se contrasta con el *polling* (modelo *pull*), en el que el interesado consulta 
 
 ```mermaid
 flowchart LR
-    T["Evento:<br/>se crea un pedido"] --> A1["Servicio A<br/>arma el payload"]
-    A1 --> S["Firma HMAC-SHA256<br/>(clave compartida)"]
-    S --> P["POST /webhooks/pedido<br/>header X-Signature"]
-    P --> B1["Servicio B<br/>recalcula la firma y compara"]
-    B1 -->|coincide| OK["Procesa y registra<br/>el evento (201)"]
-    B1 -->|no coincide| NO["Rechaza (401)<br/>no registra nada"]
+    C["Cliente<br/>compra"] --> A1["Servicio A (tienda)<br/>pedido + pago PENDING"]
+    A1 -->|POST /payments| B1["Servicio B (proveedor)<br/>responde PROCESSING"]
+    B1 --> P["Procesa unos segundos<br/>decide el resultado"]
+    P -->|"Webhook POST /webhooks/payments<br/>header X-Signature"| A2["Servicio A<br/>verifica la firma HMAC"]
+    A2 -->|coincide| OK["Actualiza pago y pedido<br/>responde 200"]
+    A2 -->|no coincide| NO["Rechaza (401)<br/>no cambia nada"]
 ```
 
-**Secuencia completa, incluyendo el frontend:**
+**Secuencia completa:**
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor U as Usuario
-    participant F as Frontend (Nginx :8080)
-    participant A as Servicio A (:3000)
-    participant B as Servicio B (:3001)
+    actor U as Cliente
+    participant A as Servicio A - Tienda (:3000)
+    participant DB as PostgreSQL
+    participant B as Servicio B - Proveedor (:3001)
 
-    U->>F: Registra la URL de B y el evento
-    F->>A: POST /suscripciones
-    A-->>F: 201 con la suscripción guardada
-    U->>F: Crea un pedido
-    F->>A: POST /pedidos
-    A-->>F: 201 con el pedido (responde de inmediato)
-    Note over A: Trigger: ocurre el evento pedido.creado
-    Note over A: Firma el payload con HMAC-SHA256
-    A->>B: POST /webhooks/pedido con header X-Signature
-    Note over B: Recalcula el HMAC y compara con timingSafeEqual
-    alt La firma coincide
-        B-->>A: 201 Webhook recibido y verificado
-        Note over B: Guarda el evento
-    else Firma inválida o ausente
-        B-->>A: 401 Unauthorized
-        Note over B: No guarda nada
+    Note over B: Al arrancar registra la URL de la tienda<br/>(suscripción a payment.updated)
+    U->>A: POST /payments { product, amount, provider }
+    A->>DB: pedido PENDING_PAYMENT + pago PENDING
+    A->>B: POST /payments { paymentId, amount }
+    B-->>A: PROCESSING (respuesta inmediata)
+    A-->>U: 201 con el pago en PENDING
+    Note over B: Procesa con demora simulada
+    opt Monto >= DEFERRED_THRESHOLD
+        B->>A: Webhook payment.updated DEFERRED
+        A->>DB: pago DEFERRED (el pedido sigue pendiente)
+        Note over B: Procesa otra vez
     end
-    loop Cada 2 segundos
-        F->>B: GET /webhooks/recibidos
-        B-->>F: Lista de eventos verificados
+    Note over B: Decide APPROVED o REJECTED<br/>firma HMAC-SHA256(body, HMAC_SECRET)
+    B->>A: Webhook POST /webhooks/payments + X-Signature
+    Note over A: Recalcula el HMAC y compara con timingSafeEqual
+    alt La firma coincide
+        A->>DB: pago APPROVED / REJECTED<br/>pedido PAID / PAYMENT_REJECTED
+        A-->>B: 200 (también si el webhook es repetido)
+    else Firma inválida o ausente
+        A-->>B: 401 Unauthorized
     end
 ```
 
@@ -87,7 +87,7 @@ git clone -b development https://github.com/Luz-Davila/servicio-b.git
 git clone https://github.com/Camilo-FG/investigacionwebhooksfrontend.git
 
 # 3. Variables de entorno (este paso es obligatorio)
-cp .env.example .env
+cp .env.example .env      # luego completar DATABASE_URL
 
 # 4. Levantar todo
 ./run.sh          # macOS / Linux (la primera vez: chmod +x run.sh)
@@ -96,126 +96,157 @@ cp .env.example .env
 
 Al terminar, el script imprime **`Abrir: http://localhost:8080`**. La primera ejecución tarda unos minutos porque Docker descarga las imágenes y compila los tres servicios.
 
-Dos detalles importantes:
+Detalles importantes:
 
-- **Servicio B debe clonarse desde la rama `development`.** La rama `main` solo tiene el esqueleto vacío, sin el receptor del webhook.
-- **No omitas `cp .env.example .env`.** Sin ese archivo, Docker Compose deja `HMAC_SECRET` vacío en ambos servicios. El sistema seguiría funcionando porque los dos coinciden, pero firmaría con una clave vacía, que no protege nada.
+- **Servicio B debe clonarse desde la rama `development`.** La rama `main` solo tiene el esqueleto vacío.
+- **`DATABASE_URL` debe apuntar al proyecto de Supabase del equipo**, y las migraciones de `servicio-a/supabase/migrations/` deben estar aplicadas (`supabase db push` o pegando los archivos en el SQL Editor, en orden).
+- **No omitas `cp .env.example .env`.** Sin ese archivo, `HMAC_SECRET` queda vacío y la firma no protege nada.
 
 ### Puertos y variables
 
 | Recurso | Valor | Para qué |
 |---|---|---|
-| `http://localhost:8080` | Frontend (Nginx) | Única URL necesaria para usar la aplicación |
-| `http://localhost:3000` | Servicio A | Expuesto para probar con `curl` |
-| `http://localhost:3001` | Servicio B | Expuesto para probar con `curl` |
-| `HMAC_SECRET` (`.env`) | Clave compartida | **Debe ser idéntica** en A y B, o la firma nunca verifica |
-| `PORT_A`, `PORT_B`, `PORT_FRONTEND` | Puertos del host | Opcionales, para cambiar los puertos por defecto |
+| `http://localhost:8080` | Frontend (Nginx) | Interfaz de la demo |
+| `http://localhost:3000` | Servicio A (tienda) | Expuesto para probar con `curl` |
+| `http://localhost:3001` | Servicio B (proveedor) | Expuesto para probar con `curl` |
+| `HMAC_SECRET` | Clave compartida | **Debe ser idéntica** en A y B, o la firma nunca verifica |
+| `DATABASE_URL` | PostgreSQL de Supabase | Pedidos y pagos de la tienda |
+| `PROCESSING_DELAY_MS` | `3000` | Demora simulada del proveedor |
+| `DEFERRED_THRESHOLD` | `50000` | Desde este monto el pago pasa primero por `DEFERRED` |
+| `PORT_A`, `PORT_B`, `PORT_FRONTEND` | Puertos del host | Opcionales |
 
-Dentro de la red de Docker los servicios se ven por su nombre (`http://service-a:3000`, `http://service-b:3001`), **no** por `localhost`. Por eso la URL de suscripción que se registra es `http://service-b:3001/webhooks/pedido`.
+Dentro de la red de Docker los servicios se ven por su nombre (`http://service-a:3000`, `http://service-b:3001`), **no** por `localhost`. Por eso la URL de webhook que el proveedor registra para la tienda es `http://service-a:3000/webhooks/payments` (Compose la configura con `DEFAULT_WEBHOOK_URL`).
 
 ### Detener y reproducir desde cero
 
 ```bash
 docker compose down        # detiene los contenedores
-docker compose down -v     # además elimina volúmenes (arranque totalmente limpio)
+docker compose down -v     # además elimina volúmenes
 ```
 
 ### Alternativa sin Docker (desarrollo)
 
-Con Node 20 o superior, en tres terminales:
+Con Node 20 o superior, sin tener que reconstruir contenedores (cada servicio se recarga solo al guardar):
 
-```bash
-cd servicio-a && npm install && npm run start      # :3000
-cd servicio-b && npm install && npm run start      # :3001 (rama development)
-cd investigacionwebhooksfrontend && npm install && npm run dev   # :8080, con proxy hacia A y B
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-local.ps1
 ```
 
-En este modo la URL de suscripción es `http://localhost:3001/webhooks/pedido` (el frontend la propone automáticamente). Si el puerto 3000 o 3001 está ocupado, se puede cambiar con `PORT=3002 npm run start` en el servicio y `PORT_A=3002 npm run dev` (o `PORT_B`) en el frontend.
+El script apaga los contenedores si están arriba (usan los mismos puertos), instala dependencias si faltan y abre una ventana por servicio: A en `:3000`, B en `:3001` y el frontend en `:8080`.
+
+Usa **el mismo `.env` de la carpeta raíz** que Docker (paso 3): A y B lo leen al arrancar. Ya trae `SERVICE_B_URL` y `DEFAULT_WEBHOOK_URL` apuntando a `localhost`; Docker las ignora porque `docker-compose.yml` define las suyas con los nombres `service-a` y `service-b`. Solo hace falta completar `HMAC_SECRET` y `DATABASE_URL`.
+
+Para hacerlo a mano (por ejemplo en Mac o Linux): `npm install` y `npm run start:dev` en `servicio-a` y `servicio-b`, y `npm install` y `npm run dev` en `investigacionwebhooksfrontend`.
+
+Si se corre un servicio solo, sin la carpeta de infraestructura, cada uno tiene su propio `.env.example` para copiar como `.env`. Si existen los dos archivos, manda el de la raíz, y una variable definida en el sistema (como las de Docker) siempre gana sobre cualquier archivo.
 
 ## 4. Cómo probar el escenario
 
+### Reglas del proveedor simulado
+
+| Monto | Webhooks que envía B | Estado final del pago | Estado final del pedido |
+|---|---|---|---|
+| Parte entera par (ej. `15000`) | `APPROVED` | `APPROVED` | `PAID` |
+| Parte entera impar (ej. `15001`) | `REJECTED` | `REJECTED` | `PAYMENT_REJECTED` |
+| `>= 50000` (ej. `60000`) | `DEFERRED` y luego el resultado final | `APPROVED` o `REJECTED` | `PAID` o `PAYMENT_REJECTED` |
+
 ### Opción A: desde la interfaz
 
-1. **Suscríbete.** En el paso 1, deja la URL `http://service-b:3001/webhooks/pedido` y pulsa *Registrar suscripción*.
-2. **Crea un pedido.** En el paso 2, pulsa *Crear pedido y disparar webhook*. Ese es el trigger.
-3. **Mira el resultado.** El diagrama se anima con el recorrido (pedido, firma, envío, verificación) y, en unos segundos como máximo, aparece una fila en la tabla *Lo que recibe el Servicio B*, con la latencia real del webhook.
-4. **Prueba la seguridad.** Pulsa *Enviar webhook con firma falsa*: B responde `401` y no se registra ningún evento.
+Abre `http://localhost:8080`, ingresa un monto y procesa el pago con el proveedor `FAKE`. El pago aparece en `PENDING` y, unos segundos después, cambia solo a `APPROVED` o `REJECTED`: ese cambio lo provoca el webhook.
+
+La interfaz muestra la evidencia de cada lado:
+
+| Dónde | Qué muestra | Responde a |
+|---|---|---|
+| Clic en un pedido | Línea de tiempo del pago: creado, recibido por el proveedor, cada webhook enviado y qué hizo la tienda con él, con hora y milisegundos | Flujo asíncrono completo |
+| Clic en un webhook enviado | Petición exacta: URL, cabeceras (`X-Signature`), cuerpo firmado, respuesta de la tienda e intentos | Qué se transmite |
+| Webhooks recibidos por la tienda | Todo lo que llegó a A: aplicado, repetido, firma inválida o tienda caída | Quién procesa |
+| Botón Reenviar | Manda otra vez los mismos bytes con la misma firma; la tienda responde `200` con `applied: false` | Idempotencia |
+| Simular tienda caída | El endpoint de webhooks de A responde `503`; B reintenta 3 veces y marca la entrega como fallida | Reintentos y recuperación |
+
+**Guion para mostrar fallos y recuperación:** enciende *Simular tienda caída*, compra con `15000` y espera: la entrega aparece como *Falló* tras 3 intentos y el pedido sigue esperando. Apaga la simulación, abre esa entrega y pulsa *Reenviar*: la tienda la aplica y el pedido queda pagado. Pulsa *Reenviar* otra vez: `200`, sin cambios.
 
 ### Opción B: con `curl`
 
-Todos los comandos se ejecutan desde la carpeta del proyecto.
+En PowerShell usa `curl.exe` en lugar de `curl`.
 
-**1. Registrar la suscripción** (A guardará a qué URL avisar):
+**1. Ver la URL de webhook registrada en el proveedor:**
 
 ```bash
-curl -X POST http://localhost:3000/suscripciones \
-  -H "Content-Type: application/json" \
-  -d '{"url":"http://service-b:3001/webhooks/pedido","event":"pedido.creado"}'
+curl http://localhost:3001/suscripciones
 ```
 
-**2. Crear un pedido** (el trigger):
+**2. Comprar (crea el pedido y el pago en `PENDING`):**
 
 ```bash
-curl -X POST http://localhost:3000/pedidos \
+curl -X POST http://localhost:3000/payments \
   -H "Content-Type: application/json" \
-  -d '{"producto":"Café","monto":12.5}'
+  -d '{"product":"Producto A","amount":15000,"provider":"FAKE"}'
 ```
 
-**3. Ver lo que recibió B** (la evidencia de que la comunicación ocurrió):
+**3. Ver el resultado unos segundos después** (la evidencia de que el webhook llegó):
 
 ```bash
-curl http://localhost:3001/webhooks/recibidos
-docker compose logs service-b     # línea: "Webhook recibido y verificado: {...}"
+curl http://localhost:3000/payments        # status: APPROVED
+curl http://localhost:3000/pedidos         # status: PAID
+curl http://localhost:3001/webhooks/entregas   # cada webhook enviado: petición exacta, respuesta e intentos
+curl http://localhost:3000/webhooks/recibidos  # cada webhook que llegó a la tienda y qué hizo con él
+curl http://localhost:3001/payments            # lo que sabe el proveedor de cada cobro
+docker compose logs service-b              # "Webhook payment.updated (APPROVED) entregado a ..."
 ```
 
 **4. Probar la verificación de la firma:**
 
 ```bash
-# a) Firma inventada -> 401 "Firma inválida"
-curl -i -X POST http://localhost:3001/webhooks/pedido \
+# a) Firma inventada -> 401
+curl -i -X POST http://localhost:3000/webhooks/payments \
   -H "Content-Type: application/json" -H "X-Signature: firma-falsa" \
-  -d '{"id":"x","producto":"Falso","monto":1}'
+  -d '{"event":"payment.updated","paymentId":"d81f874c-c790-4e4b-bf48-e0d839fa6f4a","status":"APPROVED"}'
 
-# b) Firma válida calculada a mano con la clave del .env -> 201
+# b) Misma petición firmada con la clave del .env (usa un paymentId real del paso 2) -> 200
 SECRET=$(grep '^HMAC_SECRET=' .env | cut -d= -f2)
-BODY='{"id":"manual-1","producto":"Manual","monto":5,"fecha":"2026-01-01T00:00:00.000Z"}'
+BODY='{"event":"payment.updated","paymentId":"<paymentId>","status":"APPROVED"}'
 SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $NF}')
-curl -i -X POST http://localhost:3001/webhooks/pedido \
+curl -i -X POST http://localhost:3000/webhooks/payments \
   -H "Content-Type: application/json" -H "X-Signature: $SIG" -d "$BODY"
-
-# c) Misma firma, pero con el monto alterado -> 401 (la firma ya no corresponde al contenido)
-curl -i -X POST http://localhost:3001/webhooks/pedido \
-  -H "Content-Type: application/json" -H "X-Signature: $SIG" \
-  -d '{"id":"manual-1","producto":"Manual","monto":5000,"fecha":"2026-01-01T00:00:00.000Z"}'
 ```
 
-Lo que demuestra: solo quien conoce la clave puede producir una firma válida (b), y cualquier cambio en el contenido invalida la firma (c). La firma **no** oculta el contenido; solo garantiza autenticidad e integridad.
+Si se repite (b), la tienda responde `200` con `applied: false`: el webhook ya estaba procesado y no se vuelve a aplicar (**idempotencia**).
 
-**5. Ver qué pasa si el receptor está caído** (la principal desventaja de los webhooks):
+**5. Ver qué pasa si la tienda está caída** (la principal desventaja de los webhooks):
 
 ```bash
-docker compose stop service-b
-curl -X POST http://localhost:3000/pedidos -H "Content-Type: application/json" -d '{"producto":"Con B caído","monto":1}'
-docker compose start service-b
-curl http://localhost:3001/webhooks/recibidos      # el pedido NO aparece: el evento se perdió
+curl -X PUT http://localhost:3000/webhooks/simulacion -H "Content-Type: application/json" \
+  -d '{"storeDown":true}'                      # el endpoint de webhooks responde 503
+curl -X POST http://localhost:3000/payments -H "Content-Type: application/json" \
+  -d '{"amount":15000,"provider":"FAKE"}'
+curl http://localhost:3001/webhooks/entregas   # result: FAILED, attempts: 3
+curl http://localhost:3000/payments            # el pago se quedó en PENDING
+
+curl -X PUT http://localhost:3000/webhooks/simulacion -H "Content-Type: application/json" \
+  -d '{"storeDown":false}'
+curl -X POST http://localhost:3001/webhooks/entregas/<id-de-la-entrega>/reenviar   # applied: true
+curl -X POST http://localhost:3001/webhooks/entregas/<id-de-la-entrega>/reenviar   # applied: false
 ```
 
-A hace tres intentos en menos de un segundo (el original y dos reintentos) y luego se rinde, dejando el error en su log (`docker compose logs service-a`). Cuando B vuelve, nadie le reenvía lo que se perdió.
+B hace tres intentos (esperando 0,5 s y 1 s entre ellos) y se rinde. El webhook perdido no se reenvía solo: hay que reenviarlo a mano, y como la tienda es idempotente, reenviarlo de más no hace daño.
 
 ## 5. Explicación del flujo de comunicación
 
-Todo empieza con una **suscripción**: alguien (la interfaz o un `curl`) le indica al Servicio A la URL a la que debe avisar, que es la del Servicio B, y el evento que interesa, `pedido.creado`. A guarda esa información en memoria. Es el equivalente a dar tu número de teléfono para que te avisen cuando el paquete llegue.
+Todo empieza con una **suscripción**: el proveedor (Servicio B) guarda a qué URL debe avisar y para qué evento (`payment.updated`). En la demo, Compose registra la URL de la tienda al arrancar, igual que en Stripe u Onvo se registra la URL de webhook en su panel. También se puede registrar con `POST /suscripciones`.
 
-Luego ocurre el **trigger**. Cuando se hace `POST /pedidos`, A guarda el pedido, responde de inmediato al cliente y, por su cuenta, busca qué suscripciones existen para `pedido.creado`. Para cada una arma el payload (`id`, `producto`, `monto`, `fecha`), calcula su firma HMAC-SHA256 con la clave compartida y lo envía por `POST` a la URL registrada, con la firma en el header `X-Signature`. El envío es asíncrono: quien creó el pedido no espera a que el webhook termine. Si el envío falla, A lo intenta hasta tres veces en total (el original y dos reintentos, con esperas de 250 y 500 ms) y, si sigue fallando, registra el error.
+Cuando el cliente compra, la tienda (Servicio A) crea en una sola transacción el **pedido** (`PENDING_PAYMENT`) y su **pago** (`PENDING`) en PostgreSQL, y le envía al proveedor `POST /payments` con el `paymentId` y el monto. El proveedor responde de inmediato `PROCESSING`: esa respuesta **no** aprueba nada, solo confirma que recibió la solicitud.
 
-Del otro lado, B recibe el `POST` en `/webhooks/pedido`. Como ese endpoint es público y no hay usuario autenticado, su seguridad depende de la firma: B recalcula el HMAC sobre el cuerpo exacto que recibió, con su copia de la clave, y lo compara con el header usando `crypto.timingSafeEqual`. Si coincide, guarda el evento y responde `201`; si no coincide o falta el header, responde `401` y no guarda nada. El frontend consulta cada 2 segundos a B para mostrar los eventos, y todas sus peticiones pasan por un proxy Nginx (`/api/a/*` y `/api/b/*`), de modo que el navegador ve un único origen y no se topa con el bloqueo de CORS. A y B además tienen `enableCors()` habilitado.
+Luego el proveedor procesa el pago con una demora simulada y decide el resultado. Arma el payload (`event`, `paymentId`, `externalPaymentId`, `status`), calcula su firma HMAC-SHA256 con la clave compartida y lo envía por `POST` a cada URL suscrita, con la firma en el header `X-Signature`. Si el envío falla, lo intenta hasta tres veces (con esperas de 500 ms y 1 s) y deja registrada cada entrega en `GET /webhooks/entregas`, con los bytes exactos, las cabeceras, la respuesta de la tienda y cada intento. Una entrega se puede reenviar con `POST /webhooks/entregas/:id/reenviar`.
+
+La tienda recibe el webhook en `/webhooks/payments`. Como ese endpoint es público, su seguridad depende de la firma: recalcula el HMAC sobre los bytes exactos que recibió y lo compara con `crypto.timingSafeEqual`. Si no coincide responde `401`. Si coincide, actualiza el pago **solo si está en un estado anterior permitido** (`PENDING` o `DEFERRED`) y, en la misma transacción, cierra el pedido (`PAID` o `PAYMENT_REJECTED`). Un webhook repetido o atrasado se responde con `200` sin cambiar nada, para que el proveedor no siga reintentando. Cada petición que llega, aceptada o rechazada, queda en `GET /webhooks/recibidos`.
 
 ## 6. Repositorios y estructura
 
 | Repositorio | Contenido |
 |---|---|
-| [servicio-a](https://github.com/Keril-valle/servicio-a) | Dispara el webhook: suscripciones, pedidos, firma HMAC y reintentos |
-| [servicio-b](https://github.com/Luz-Davila/servicio-b) (rama `development`) | Recibe el webhook, verifica la firma y guarda los eventos |
+| [servicio-a](https://github.com/Keril-valle/servicio-a) | Tienda: pedidos, pagos en PostgreSQL y receptor del webhook (verificación HMAC, idempotencia) |
+| [servicio-b](https://github.com/Luz-Davila/servicio-b) (rama `development`) | Proveedor simulado: procesa pagos, suscripciones y envío del webhook firmado con reintentos |
 | [investigacion-webhooks-infra-](https://github.com/Camilo-FG/investigacion-webhooks-infra-) | `docker-compose.yml`, `run.sh`, `run.ps1`, `.env.example` |
 | [investigacionwebhooksfrontend](https://github.com/Camilo-FG/investigacionwebhooksfrontend) | Interfaz React + Nginx con proxy hacia A y B |
 
@@ -229,6 +260,6 @@ investigacion-webhooks/          <- repo de infraestructura
 └── investigacionwebhooksfrontend/
 ```
 
-**Tecnologías:** NestJS 11 (A y B), React 18 + Vite (frontend), Nginx (servidor estático y proxy), Docker Compose, módulo `crypto` de Node para HMAC-SHA256.
+**Tecnologías:** NestJS 11 (A y B), PostgreSQL en Supabase, React 18 + Vite (frontend), Nginx (servidor estático y proxy), Docker Compose, módulo `crypto` de Node para HMAC-SHA256.
 
-**Limitaciones conocidas.** Por ser un ejemplo académico, A y B guardan todo en memoria (un reinicio borra suscripciones, pedidos y eventos recibidos), los reintentos de A duran menos de un segundo, y B no distingue mensajes repetidos.
+**Limitaciones conocidas.** Por ser un ejemplo académico, el proveedor guarda suscripciones, cobros y entregas en memoria (igual que la tienda su registro de webhooks recibidos), sus reintentos duran pocos segundos, el reenvío de un webhook fallido es manual y la firma no incluye un timestamp, así que no protege contra ataques de repetición. La segunda demo con Onvo reemplaza al proveedor simulado por uno real.
