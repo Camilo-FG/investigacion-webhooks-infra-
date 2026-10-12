@@ -83,7 +83,7 @@ cd investigacion-webhooks
 
 # 2. Los tres servicios, como carpetas hermanas dentro de la anterior
 git clone https://github.com/Keril-valle/servicio-a.git
-git clone -b development https://github.com/Luz-Davila/servicio-b.git
+git clone https://github.com/Luz-Davila/servicio-b.git
 git clone https://github.com/Camilo-FG/investigacionwebhooksfrontend.git
 
 # 3. Variables de entorno (este paso es obligatorio)
@@ -98,7 +98,6 @@ Al terminar, el script imprime **`Abrir: http://localhost:8080`**. La primera ej
 
 Detalles importantes:
 
-- **Servicio B debe clonarse desde la rama `development`.** La rama `main` solo tiene el esqueleto vacío.
 - **`DATABASE_URL` debe apuntar al proyecto de Supabase del equipo**, y las migraciones de `servicio-a/supabase/migrations/` deben estar aplicadas (`supabase db push` o pegando los archivos en el SQL Editor, en orden).
 - **No omitas `cp .env.example .env`.** Sin ese archivo, `HMAC_SECRET` queda vacío y la firma no protege nada.
 
@@ -246,7 +245,7 @@ La tienda recibe el webhook en `/webhooks/payments`. Como ese endpoint es públi
 | Repositorio | Contenido |
 |---|---|
 | [servicio-a](https://github.com/Keril-valle/servicio-a) | Tienda: pedidos, pagos en PostgreSQL y receptor del webhook (verificación HMAC, idempotencia) |
-| [servicio-b](https://github.com/Luz-Davila/servicio-b) (rama `development`) | Proveedor simulado: procesa pagos, suscripciones y envío del webhook firmado con reintentos |
+| [servicio-b](https://github.com/Luz-Davila/servicio-b) | Proveedor simulado: procesa pagos, suscripciones y envío del webhook firmado con reintentos |
 | [investigacion-webhooks-infra-](https://github.com/Camilo-FG/investigacion-webhooks-infra-) | `docker-compose.yml`, `run.sh`, `run.ps1`, `.env.example` |
 | [investigacionwebhooksfrontend](https://github.com/Camilo-FG/investigacionwebhooksfrontend) | Interfaz React + Nginx con proxy hacia A y B |
 
