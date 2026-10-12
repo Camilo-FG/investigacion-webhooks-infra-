@@ -10,7 +10,9 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       SERVICE_B_URL: http://service-b:3001
       ONVO_SECRET_KEY: ${ONVO_SECRET_KEY}
+      ONVO_PUBLISHABLE_KEY: ${ONVO_PUBLISHABLE_KEY}
       ONVO_WEBHOOK_SECRET: ${ONVO_WEBHOOK_SECRET}
+      ONVO_VERIFY_EVENTS: ${ONVO_VERIFY_EVENTS:-true}
     restart: unless-stopped
 
   service-b:
