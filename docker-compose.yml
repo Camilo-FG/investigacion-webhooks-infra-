@@ -1,5 +1,6 @@
 services:
   service-a:
+    image: camilitofge/webhooks-servicio-a:latest
     build: ./servicio-a
     container_name: service-a
     ports:
@@ -16,6 +17,7 @@ services:
     restart: unless-stopped
 
   service-b:
+    image: camilitofge/webhooks-servicio-b:latest
     build: ./servicio-b
     container_name: service-b
     ports:
@@ -29,6 +31,7 @@ services:
     restart: unless-stopped
 
   frontend:
+    image: camilitofge/webhooks-frontend:latest
     build: ./investigacionwebhooksfrontend
     container_name: frontend
     ports:

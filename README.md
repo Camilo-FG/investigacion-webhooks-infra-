@@ -101,6 +101,18 @@ Detalles importantes:
 - **`DATABASE_URL` debe apuntar al proyecto de Supabase del equipo**, y las migraciones de `servicio-a/supabase/migrations/` deben estar aplicadas (`supabase db push` o pegando los archivos en el SQL Editor, en orden).
 - **No omitas `cp .env.example .env`.** Sin ese archivo, `HMAC_SECRET` queda vacío y la firma no protege nada.
 
+### Con las imágenes de Docker Hub (sin compilar)
+
+Las tres imágenes están publicadas en Docker Hub ([servicio-a](https://hub.docker.com/r/camilitofge/webhooks-servicio-a), [servicio-b](https://hub.docker.com/r/camilitofge/webhooks-servicio-b), [frontend](https://hub.docker.com/r/camilitofge/webhooks-frontend)). Con ellas no hace falta descargar dependencias de npm ni compilar; sirve en redes que bloquean npm. Solo se necesitan esta carpeta (`docker-compose.yml`) y el `.env`:
+
+```bash
+cp .env.example .env      # completar HMAC_SECRET, DATABASE_URL y, para ONVO, sus claves
+docker compose pull       # descarga las imágenes publicadas
+docker compose up -d      # levanta sin compilar (no usar --build)
+```
+
+Para publicar una versión nueva: `docker compose build` y luego `docker compose push` (requiere `docker login` con la cuenta `camilitofge`).
+
 ### Puertos y variables
 
 | Recurso | Valor | Para qué |
