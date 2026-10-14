@@ -1,30 +1,54 @@
+# Ejecución local con las imágenes publicadas en Docker Hub:
+#   docker compose pull && docker compose up -d
+# No necesita los repos de los servicios ni un .env: sin DATABASE_URL usa el PostgreSQL local (db).
+# Para compilar y publicar imágenes nuevas: docker-compose.build.yml
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: webhooks-db
+    environment:
+      POSTGRES_USER: webhooks
+      POSTGRES_PASSWORD: webhooks
+      POSTGRES_DB: webhooks
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    # Por TCP: durante la primera inicialización Postgres solo escucha por socket y aún no está listo.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U webhooks -d webhooks"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 300s
+    restart: unless-stopped
+
   service-a:
     image: camilitofge/webhooks-servicio-a:latest
-    build: ./servicio-a
     container_name: service-a
     ports:
       - "${PORT_A:-3000}:3000"
     environment:
       PORT: 3000
-      HMAC_SECRET: ${HMAC_SECRET}
-      DATABASE_URL: ${DATABASE_URL}
+      HMAC_SECRET: ${HMAC_SECRET:-secreto-local-de-la-demo}
+      DATABASE_URL: ${DATABASE_URL:-postgres://webhooks:webhooks@db:5432/webhooks?sslmode=disable}
       SERVICE_B_URL: http://service-b:3001
-      ONVO_SECRET_KEY: ${ONVO_SECRET_KEY}
-      ONVO_PUBLISHABLE_KEY: ${ONVO_PUBLISHABLE_KEY}
-      ONVO_WEBHOOK_SECRET: ${ONVO_WEBHOOK_SECRET}
+      ONVO_SECRET_KEY: ${ONVO_SECRET_KEY:-}
+      ONVO_PUBLISHABLE_KEY: ${ONVO_PUBLISHABLE_KEY:-}
+      ONVO_WEBHOOK_SECRET: ${ONVO_WEBHOOK_SECRET:-}
       ONVO_VERIFY_EVENTS: ${ONVO_VERIFY_EVENTS:-true}
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
   service-b:
     image: camilitofge/webhooks-servicio-b:latest
-    build: ./servicio-b
     container_name: service-b
     ports:
       - "${PORT_B:-3001}:3001"
     environment:
       PORT: 3001
-      HMAC_SECRET: ${HMAC_SECRET}
+      HMAC_SECRET: ${HMAC_SECRET:-secreto-local-de-la-demo}
       DEFAULT_WEBHOOK_URL: http://service-a:3000/webhooks/payments
       PROCESSING_DELAY_MS: ${PROCESSING_DELAY_MS:-3000}
       DEFERRED_THRESHOLD: ${DEFERRED_THRESHOLD:-50000}
@@ -32,7 +56,6 @@ services:
 
   frontend:
     image: camilitofge/webhooks-frontend:latest
-    build: ./investigacionwebhooksfrontend
     container_name: frontend
     ports:
       - "${PORT_FRONTEND:-8080}:80"
@@ -40,3 +63,6 @@ services:
       - service-a
       - service-b
     restart: unless-stopped
+
+volumes:
+  db-data:

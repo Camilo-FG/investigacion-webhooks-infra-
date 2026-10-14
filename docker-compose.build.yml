@@ -1,0 +1,10 @@
+# Solo para compilar y publicar las imágenes. Requiere los tres repos clonados dentro de esta carpeta.
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml build
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml push service-a service-b frontend
+services:
+  service-a:
+    build: ./servicio-a
+  service-b:
+    build: ./servicio-b
+  frontend:
+    build: ./investigacionwebhooksfrontend
