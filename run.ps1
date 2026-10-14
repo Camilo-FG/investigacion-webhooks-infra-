@@ -1,5 +1,5 @@
 # Levanta la solucion completa con las imagenes publicadas en Docker Hub (no compila nada).
-$ErrorActionPreference = "Stop"
+# Sin $ErrorActionPreference = "Stop": docker escribe su progreso en stderr y PowerShell lo trataria como error.
 Set-Location $PSScriptRoot
 
 docker compose pull
@@ -15,9 +15,9 @@ Write-Host ""
 Write-Host "Esperando a que los servicios respondan..."
 for ($i = 1; $i -le 60; $i++) {
   try {
-    Invoke-WebRequest -Uri "http://localhost:$portA/payments" -UseBasicParsing -TimeoutSec 3 | Out-Null
-    Invoke-WebRequest -Uri "http://localhost:$portB/" -UseBasicParsing -TimeoutSec 3 | Out-Null
-    Invoke-WebRequest -Uri "http://localhost:$portFront/" -UseBasicParsing -TimeoutSec 3 | Out-Null
+    Invoke-WebRequest -Uri "http://localhost:$portA/payments" -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop | Out-Null
+    Invoke-WebRequest -Uri "http://localhost:$portB/" -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop | Out-Null
+    Invoke-WebRequest -Uri "http://localhost:$portFront/" -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop | Out-Null
     Write-Host ""
     Write-Host "Listo. Abrir: http://localhost:$portFront"
     exit 0
